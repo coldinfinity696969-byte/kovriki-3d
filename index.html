@@ -1,0 +1,1229 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>3D-коврик с ворсом</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Onest:wght@400;500;600&family=Oswald:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #0f1012;
+    --glow: #2b2b2d;
+    --ink: #efeee9;
+    --muted: #a4a6ab;
+    --line: #2e3035;
+    --panel: rgba(17, 18, 20, 0.78);
+    --shadow: rgba(0, 0, 0, 0.55);
+    --giant: 255, 255, 255;
+    --thread: #d9b56c;
+    --display: "Oswald", "Arial Narrow", "Roboto Condensed", sans-serif;
+    --body: "Onest", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  }
+  html { background: var(--ground); }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.5;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .backdrop {
+    position: fixed; inset: 0; z-index: 0;
+    background: radial-gradient(60% 62% at 60% 46%, var(--glow), var(--ground) 74%);
+  }
+  .grid {
+    position: fixed; inset: 0; z-index: 0; opacity: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(127, 178, 255, .16) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(127, 178, 255, .16) 1px, transparent 1px),
+      linear-gradient(rgba(127, 178, 255, .06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(127, 178, 255, .06) 1px, transparent 1px);
+    background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+    background-position: center;
+    -webkit-mask-image: radial-gradient(75% 75% at 58% 50%, #000 25%, transparent 100%);
+    mask-image: radial-gradient(75% 75% at 58% 50%, #000 25%, transparent 100%);
+  }
+  .giants { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+  .giant {
+    position: absolute; left: 50%; top: 50%; opacity: 0; white-space: nowrap;
+    font-family: var(--display); font-weight: 600; text-transform: uppercase;
+    font-size: 27vw; line-height: .8; letter-spacing: -0.01em;
+    color: rgba(var(--giant), .04);
+    -webkit-text-stroke: 1.5px rgba(var(--giant), .13);
+    will-change: transform, opacity;
+  }
+  #stage {
+    position: fixed; inset: 0; z-index: 2;
+    width: 100%; height: 100%;
+    display: block;
+    touch-action: pan-y;
+    cursor: grab;
+  }
+  #stage.dragging { cursor: grabbing; }
+  .track { position: relative; z-index: 0; height: 920vh; pointer-events: none; }
+
+  .top {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: calc(14px + env(safe-area-inset-top, 0px)) clamp(16px, 4vw, 48px) 14px;
+    pointer-events: none;
+  }
+  .brand {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand::before { content: ""; width: 18px; height: 12px; border: 1.5px dashed var(--thread); border-radius: 3px; }
+  .demo {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; background: var(--panel);
+  }
+  .demo .short { display: none; }
+  .progress { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 6; display: none; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--thread); }
+
+  .rail {
+    position: fixed; right: clamp(16px, 2.5vw, 36px); top: 50%; transform: translateY(-50%); z-index: 5;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .rail button {
+    all: unset; cursor: pointer;
+    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); padding: 5px 0;
+  }
+  .rail button::after { content: ""; width: 14px; height: 1px; background: currentColor; transition: width .3s; }
+  .rail button.on { color: var(--ink); }
+  .rail button.on::after { width: 30px; background: var(--thread); }
+  .rail button:focus-visible { outline: 1px solid var(--thread); outline-offset: 4px; }
+
+  .tags { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
+  .tag {
+    position: absolute; left: 0; top: 0; opacity: 0;
+    display: flex; align-items: center; white-space: nowrap;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink); text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
+    will-change: transform, opacity;
+  }
+  .tag::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--thread);
+    box-shadow: 0 0 0 3px rgba(217, 181, 108, .22), 0 0 14px rgba(217, 181, 108, .8);
+  }
+  .tag .ln { width: 34px; height: 1px; background: var(--thread); opacity: .7; margin: 0 8px 0 4px; }
+
+  .ruler {
+    position: fixed; z-index: 3; right: 19vw; top: 50%; height: 46vh; width: 110px;
+    transform: translateY(-50%); opacity: 0; pointer-events: none;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .ruler .scale { position: absolute; left: 0; top: 0; bottom: 0; width: 34px; border-right: 1px solid rgba(var(--giant), .35); }
+  .ruler .tk { position: absolute; right: 0; height: 1px; width: 8px; background: rgba(var(--giant), .35); }
+  .ruler .tk.major { width: 16px; background: rgba(var(--giant), .7); }
+  .ruler .tk span { position: absolute; right: 22px; top: -7px; }
+  .ruler .fill {
+    position: absolute; left: 42px; bottom: 0; width: 6px; border-radius: 3px; height: 0;
+    background: var(--thread); box-shadow: 0 0 18px rgba(217, 181, 108, .65);
+  }
+  .ruler .val {
+    position: absolute; left: 58px; bottom: 0; transform: translateY(50%); white-space: nowrap;
+    color: var(--thread); font-size: 13px; letter-spacing: .06em;
+  }
+
+  .caps {
+    position: fixed; z-index: 4;
+    left: clamp(20px, 5vw, 76px); bottom: 11vh;
+    width: min(440px, 38vw);
+    pointer-events: none;
+  }
+  .cap { position: absolute; left: 0; right: 0; bottom: 0; visibility: hidden; text-shadow: 0 1px 16px var(--shadow); }
+  .cap.live { visibility: visible; }
+  .cap.cfg.touch { pointer-events: auto; }
+  .fd { will-change: transform, opacity; }
+  .wm { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: .08em; margin-bottom: -.08em; }
+  .wi { display: inline-block; will-change: transform; }
+  .cap .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--thread); margin: 0 0 12px;
+  }
+  .cap h1, .cap h2 {
+    font-family: var(--display); font-weight: 500; text-transform: uppercase;
+    letter-spacing: 0.01em; line-height: 1.02; margin: 0 0 14px; text-wrap: balance;
+  }
+  .cap h1 { font-size: clamp(40px, 4.8vw, 70px); }
+  .cap h2 { font-size: clamp(32px, 3.5vw, 50px); }
+  .cap p { color: var(--muted); margin: 0; max-width: 38ch; }
+  .cap .big {
+    font-family: var(--display); font-weight: 400; line-height: .9; color: var(--ink);
+    font-size: clamp(80px, 10.5vw, 160px); margin: 0 0 16px;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+  .cap .big small { font-size: .36em; letter-spacing: 0.04em; margin-left: .12em; color: var(--muted); }
+  .cap .big.word { font-size: clamp(56px, 7.2vw, 108px); text-transform: uppercase; }
+  .hint {
+    margin-top: 20px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; color: var(--muted);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .hint::before { content: ""; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--thread); flex: none;
+    background: radial-gradient(circle, var(--thread) 0 3px, transparent 4px); animation: pulse 2.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px rgba(217, 181, 108, 0); transform: scale(.9); } 0%, 100% { box-shadow: 0 0 0 0 rgba(217, 181, 108, .45); } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; text-shadow: none;
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    display: grid; gap: 16px;
+  }
+  .panel h2 { margin: 0; }
+  .row { display: grid; gap: 8px; }
+  .row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .row-head label, .row-head span.lbl { font-size: 13px; color: var(--muted); }
+  .row-head b { font-family: var(--display); font-weight: 400; font-size: 20px; font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: var(--thread); margin: 0; height: 28px; }
+  .presets { display: flex; gap: 6px; }
+  .presets button {
+    font: 500 13px/1 var(--body); color: var(--ink); cursor: pointer;
+    background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px;
+  }
+  .presets button[aria-pressed="true"] { border-color: var(--thread); color: var(--ink); background: rgba(217, 181, 108, .18); }
+  .sw { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sw button {
+    width: 34px; height: 34px; border-radius: 8px; cursor: pointer; padding: 0;
+    border: 1px solid rgba(var(--giant), .18);
+    box-shadow: inset 0 -6px 10px rgba(0, 0, 0, .25);
+    transition: transform .15s;
+  }
+  .sw button:hover { transform: translateY(-2px); }
+  .sw button[aria-pressed="true"] { outline: 2px solid var(--thread); outline-offset: 2px; }
+  .panel button:focus-visible, .panel input:focus-visible { outline: 2px solid var(--thread); outline-offset: 2px; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+  .toggle input {
+    appearance: none; -webkit-appearance: none; margin: 0; cursor: pointer;
+    width: 38px; height: 22px; border-radius: 999px; background: var(--line); position: relative; transition: background .2s;
+  }
+  .toggle input::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--ink); transition: transform .2s;
+  }
+  .toggle input:checked { background: var(--thread); }
+  .toggle input:checked::after { transform: translateX(16px); background: #17130b; }
+  .order {
+    font: 600 14px/1 var(--body); cursor: pointer; border: 0; border-radius: 10px; padding: 13px 18px;
+    background: var(--thread); color: #17130b; box-shadow: 0 8px 24px rgba(217, 181, 108, .35);
+    transition: transform .15s, box-shadow .15s;
+  }
+  .order:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(217, 181, 108, .45); }
+  .summary { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0; }
+  .note { font-size: 13px; color: var(--ink); margin: 0; border-left: 2px solid var(--thread); padding-left: 10px; }
+  .nogl {
+    position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; padding-inline: 24px;
+    text-align: center; color: var(--muted); background: var(--ground);
+  }
+
+  @media (max-width: 760px) {
+    .rail { display: none; }
+    .progress { display: block; }
+    .demo .long { display: none; }
+    .demo .short { display: inline; }
+    .giant { font-size: 46vw; top: 34%; }
+    .caps { left: 16px; right: 16px; width: auto; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+    .cap:not(.cfg) {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px; text-shadow: none;
+      -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    }
+    .cap h1 { font-size: 34px; }
+    .cap h2 { font-size: 28px; }
+    .cap p { font-size: 15px; }
+    .cap .big { font-size: 64px; margin-bottom: 10px; }
+    .cap .big.word { font-size: 46px; }
+    .hint { margin-top: 12px; }
+    .panel { padding: 14px; gap: 12px; }
+    .cfg .eyebrow { display: none; }
+    .ruler { right: 16px; top: calc(62px + env(safe-area-inset-top, 0px)); transform: none; height: 30vh; width: 96px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hint::before { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="backdrop" aria-hidden="true"></div>
+<div class="grid" id="grid" aria-hidden="true"></div>
+<div class="giants" id="giants" aria-hidden="true"></div>
+<canvas id="stage" aria-label="3D-модель коврика: можно крутить и гладить ворс"></canvas>
+<div class="track" id="track" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="brand">Мастерская автоковриков</div>
+  <div class="demo"><span class="long">Демо: цвета и цифры условные</span><span class="short">Демо</span></div>
+</header>
+<div class="progress" aria-hidden="true"><i id="prog"></i></div>
+
+<nav class="rail" id="rail" aria-label="Шаги">
+  <button type="button" data-s="0">Коврик</button>
+  <button type="button" data-s="1.7">Ворс</button>
+  <button type="button" data-s="4.1">Цвет</button>
+  <button type="button" data-s="6.05">Слои</button>
+  <button type="button" data-s="7.2">Низ</button>
+  <button type="button" data-s="8.2">Собрать</button>
+</nav>
+
+<div class="tags" id="tags" aria-hidden="true"></div>
+<div class="ruler" id="ruler" aria-hidden="true">
+  <div class="scale" id="rulerScale"></div>
+  <div class="fill" id="rulerFill"></div>
+  <div class="val" id="rulerVal">10 мм</div>
+</div>
+
+<section class="caps" id="caps">
+  <div class="cap">
+    <p class="eyebrow fd">Ворсовые автоковрики на заказ</p>
+    <h1 data-split>Коврик, который хочется потрогать</h1>
+    <p class="fd">Шьём под вашу машину: высота ворса, цвет и окантовка на ваш выбор. Отправляем по России.</p>
+    <div class="hint fd" data-hint="Листайте вниз. Наведите мышку на ворс|Листайте вниз. Потрогайте ворс пальцем"></div>
+  </div>
+  <div class="cap">
+    <p class="eyebrow fd">Высота ворса</p>
+    <p class="big" data-split><span id="mmv">6</span><small>мм</small></p>
+    <p class="fd">6 мм: плотный и тонкий, быстро чистится. 10 мм: мягче, прячет песок и крошки. 15 мм: самый пушистый, нога утопает.</p>
+    <div class="hint fd" data-hint="Проведите мышкой по ворсу, он приминается|Проведите пальцем по ворсу"></div>
+  </div>
+  <div class="cap">
+    <p class="eyebrow fd">Цвет ворса</p>
+    <p class="big word" data-split id="colName">Графит</p>
+    <p class="fd">7 цветов ворса и 6 цветов канта. В тон или на контрасте, как захотите.</p>
+  </div>
+  <div class="cap">
+    <p class="eyebrow fd">Из чего собран</p>
+    <h2 data-split>Пять частей</h2>
+    <p class="fd">Основа, ворс, окантовка, подпятник и шильдик. Подпятник и шильдик выбираете при заказе.</p>
+  </div>
+  <div class="cap">
+    <p class="eyebrow fd">Снизу</p>
+    <h2 data-split>Шипы держат коврик на месте</h2>
+    <p class="fd">Резиновая основа с шипами цепляется за покрытие салона. Коврик не уезжает под педали.</p>
+  </div>
+  <div class="cap cfg">
+    <div class="panel fd">
+      <div>
+        <p class="eyebrow">Конструктор</p>
+        <h2>Соберите свой</h2>
+      </div>
+      <div class="row">
+        <div class="row-head"><label for="mm">Высота ворса</label><b id="mmOut">10 мм</b></div>
+        <input type="range" id="mm" min="5" max="16" step="0.5" value="10">
+        <div class="presets" id="presets">
+          <button type="button" data-mm="6" aria-pressed="false">6 мм</button>
+          <button type="button" data-mm="10" aria-pressed="true">10 мм</button>
+          <button type="button" data-mm="15" aria-pressed="false">15 мм</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-head"><span class="lbl">Цвет ворса</span><b id="pileOut">Графит</b></div>
+        <div class="sw" id="pileSw" role="group" aria-label="Цвет ворса"></div>
+      </div>
+      <div class="row">
+        <div class="row-head"><span class="lbl">Окантовка</span><b id="edgeOut">Красный</b></div>
+        <div class="sw" id="edgeSw" role="group" aria-label="Цвет окантовки"></div>
+      </div>
+      <div class="foot">
+        <label class="toggle" for="heel"><input type="checkbox" id="heel" checked> Подпятник</label>
+        <button type="button" class="order" id="order">Хочу такой комплект</button>
+      </div>
+      <p class="summary" id="summary"></p>
+      <p class="note" id="note" hidden>В рабочей версии заявка с этими параметрами уйдёт мастерской в Telegram и на почту.</p>
+    </div>
+  </div>
+</section>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ---------- данные (условные, заменим на реальные из мастерской) ----------
+const PILE = [['Графит', '#3c3e43'], ['Чёрный', '#1d1d20'], ['Серый', '#7c7e83'], ['Бежевый', '#bba585'],
+              ['Коричневый', '#5d402e'], ['Бордовый', '#632029'], ['Тёмно-синий', '#202c49']];
+const EDGE = [['Чёрный', '#171717'], ['Серый', '#8d8f93'], ['Бежевый', '#ccb694'], ['Красный', '#a9252d'],
+              ['Синий', '#26447f'], ['Коричневый', '#6e4933']];
+const cfg = { mm: 10, col: 0, edge: 3, heel: true };
+
+const S_MAX = 8.2;
+const MM = 0.016;           // единиц сцены на 1 мм ворса (1 ед. = 10 см, ворс чуть выше для наглядности)
+const BASE_TOP = 0.065;
+const coarse = matchMedia('(pointer: coarse)').matches;
+const QS = new URLSearchParams(location.search);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const DEV = location.search.includes('dev');
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const cr = (p0, p1, p2, p3, t) => 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
+const hexRgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const mixRgb = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const css = c => `rgb(${c.map(v => Math.round(v)).join(',')})`;
+
+// ---------- рендер ----------
+const canvas = document.getElementById('stage');
+// слабые встроенные видеокарты (Intel и т.п.) тонут в сглаживании со слоями ворса: там его выключаем
+let gpuName = '';
+try {
+  const pg = document.createElement('canvas').getContext('webgl2');
+  const dbg = pg && pg.getExtension('WEBGL_debug_renderer_info');
+  gpuName = dbg ? String(pg.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+  const lose = pg && pg.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+} catch (e) { /* нет данных о видеокарте */ }
+const weakGpu = /Intel|UHD|Iris|HD Graphics|SwiftShader|llvmpipe|Basic Render|Mali-[4T]|Adreno \(TM\) [3-5]/i.test(gpuName);
+const useAA = QS.get('aa') ? QS.get('aa') !== '0' : !weakGpu;
+const LAYERS = +(QS.get('L') || ((coarse || innerWidth < 760) ? 28 : (weakGpu ? 32 : 40)));
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: useAA, alpha: true, powerPreference: 'high-performance' });
+} catch (e) {
+  const d = document.createElement('div');
+  d.className = 'nogl';
+  d.textContent = 'Этот браузер не показывает 3D. Откройте страницу в Chrome или Safari.';
+  document.body.appendChild(d);
+  throw e;
+}
+let dpr = Math.min(devicePixelRatio || 1, coarse ? 1.25 : (weakGpu ? 1 : 1.5));
+renderer.setPixelRatio(dpr);
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+scene.add(key);
+const RIM_DIR = new THREE.Vector3(-3, 2.2, -6).normalize();
+const rim = new THREE.DirectionalLight(0xd9b56c, 1.1);
+rim.position.copy(RIM_DIR).multiplyScalar(10);
+scene.add(rim);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 100);
+
+// ---------- форма коврика (водительский, см / 10) ----------
+const OUT = [[-23, -33], [23, -33], [25, -8], [23, 14], [16, 30], [8, 34], [-14, 34], [-24, 26], [-25, 4]]
+  .map(([x, y]) => new THREE.Vector2(x / 10, y / 10));
+
+function roundedShape(pts, r) {
+  const s = new THREE.Shape();
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
+    const rr = Math.min(r, p0.distanceTo(p1) / 2.2, p2.distanceTo(p1) / 2.2);
+    const a = p1.clone().add(p0.clone().sub(p1).normalize().multiplyScalar(rr));
+    const b = p1.clone().add(p2.clone().sub(p1).normalize().multiplyScalar(rr));
+    if (i === 0) s.moveTo(a.x, a.y); else s.lineTo(a.x, a.y);
+    s.quadraticCurveTo(p1.x, p1.y, b.x, b.y);
+  }
+  s.closePath();
+  return s;
+}
+function inset(pts, d) {
+  const n = pts.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const t = pts[(i + 1) % n].clone().sub(pts[(i - 1 + n) % n]).normalize();
+    out.push(pts[i].clone().add(new THREE.Vector2(-t.y, t.x).multiplyScalar(d)));
+  }
+  return out;
+}
+function inside(p, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+function rrect(w, h, r) {
+  const x = -w / 2, y = -h / 2, s = new THREE.Shape();
+  s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+const outerShape = roundedShape(OUT, 0.35);
+const outerPts = outerShape.getSpacedPoints(240); outerPts.pop();
+
+const pivot = new THREE.Group();
+pivot.rotation.order = 'YXZ';
+scene.add(pivot);
+
+// основа + шипы
+const baseG = new THREE.Group();
+pivot.add(baseG);
+const rubber = new THREE.MeshStandardMaterial({ color: 0x202023, roughness: 0.9, metalness: 0 });
+const baseGeo = new THREE.ExtrudeGeometry(outerShape, { depth: 0.05, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2, curveSegments: 24 });
+baseGeo.rotateX(-Math.PI / 2);
+baseG.add(new THREE.Mesh(baseGeo, rubber));
+{
+  const area = inset(outerPts, 0.28), spots = [];
+  for (let x = -2.6; x <= 2.6; x += 0.22)
+    for (let y = -3.4; y <= 3.5; y += 0.22) {
+      const p = new THREE.Vector2(x + ((Math.round(y / 0.22) % 2) * 0.11), y);
+      if (inside(p, area)) spots.push(p);
+    }
+  const cone = new THREE.ConeGeometry(0.048, 0.085, 8);
+  cone.rotateX(Math.PI);
+  const spikes = new THREE.InstancedMesh(cone, rubber, spots.length);
+  const m = new THREE.Matrix4();
+  spots.forEach((p, i) => { m.makeTranslation(p.x, -0.056, -p.y); spikes.setMatrixAt(i, m); });
+  baseG.add(spikes);
+}
+
+// ворс: слои-оболочки в одном буфере
+const innerPts = inset(outerPts, 0.16);
+const pileFlat = new THREE.ShapeGeometry(new THREE.Shape(innerPts));
+function layered(src, L, from, to) {
+  const pos = src.attributes.position.array, idx = src.index.array, nv = pos.length / 3, n = to - from;
+  const P = new Float32Array(nv * n * 3), U = new Float32Array(nv * n * 2), H = new Float32Array(nv * n), I = [];
+  for (let l = 0; l < n; l++) {
+    const h = (l + from) / (L - 1);
+    for (let v = 0; v < nv; v++) {
+      const k = l * nv + v, x = pos[v * 3], y = pos[v * 3 + 1];
+      P[k * 3] = x; P[k * 3 + 1] = 0; P[k * 3 + 2] = -y;
+      U[k * 2] = x; U[k * 2 + 1] = y; H[k] = h;
+    }
+    for (let i = 0; i < idx.length; i++) I.push(idx[i] + l * nv);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  g.setAttribute('aUv', new THREE.BufferAttribute(U, 2));
+  g.setAttribute('aH', new THREE.BufferAttribute(H, 1));
+  g.setIndex(I);
+  g.computeBoundingSphere();
+  g.boundingSphere.radius += 0.5;
+  return g;
+}
+const TRAIL_N = 10;
+const trail = Array.from({ length: TRAIL_N }, () => new THREE.Vector4(0, 0, 0, 0));
+const HEEL = { x: 0.72, y: 1.22, w: 1.3, h: 1.04, a: -0.12 };
+const pileMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uHeight: { value: 10 * MM },
+    uColA: { value: new THREE.Color(PILE[0][1]) },
+    uColB: { value: new THREE.Color(PILE[0][1]) },
+    uColT: { value: 0 },
+    uDensity: { value: 38 },
+    uLightL: { value: new THREE.Vector3(0.35, 1, 0.55).normalize() },
+    uRimL: { value: RIM_DIR.clone() },
+    uRimC: { value: new THREE.Color(0, 0, 0) },
+    uLean: { value: new THREE.Vector2(0.22, 0.14) },
+    uHole: { value: new THREE.Vector4(HEEL.x, HEEL.y, HEEL.w / 2, HEEL.h / 2) },
+    uHoleCS: { value: new THREE.Vector2(Math.cos(HEEL.a), Math.sin(HEEL.a)) },
+    uTrailOn: { value: 0 },
+    uCut: { value: useAA ? 0.3 : 0.5 },
+    uWave: { value: 2 },
+    uTrail: { value: trail },
+  },
+  vertexShader: /* glsl */`
+    uniform float uHeight; uniform vec2 uLean;
+    attribute vec2 aUv; attribute float aH;
+    varying vec2 vUv; varying float vH;
+    void main() {
+      vec3 p = position;
+      p.y += aH * uHeight;
+      p.xz += uLean * aH * aH * uHeight;
+      vUv = aUv; vH = aH;
+      gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(p, 1.0);
+    }`,
+  fragmentShader: /* glsl */`
+    uniform vec3 uColA; uniform vec3 uColB; uniform float uColT;
+    uniform float uDensity; uniform vec3 uLightL; uniform vec3 uRimL; uniform vec3 uRimC;
+    uniform vec4 uHole; uniform vec2 uHoleCS; uniform float uWave; uniform float uTrailOn; uniform float uCut;
+    uniform vec4 uTrail[${TRAIL_N}];
+    varying vec2 vUv; varying float vH;
+    float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+    float vnoise(vec2 p) {
+      vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+    }
+    void main() {
+      vec2 q = vUv - uHole.xy;
+      q = mat2(uHoleCS.x, -uHoleCS.y, uHoleCS.y, uHoleCS.x) * q;
+      vec2 dd = abs(q) - uHole.zw;
+      if (max(dd.x, dd.y) < 0.0) discard;
+
+      // шум и волны считаем только пока идёт анимация
+      float nd = (dot(vUv, vec2(0.6, 0.8)) + 3.9) / 7.8;
+      bool waving = uWave < 1.49;
+      bool recolor = uColT > 0.001 && uColT < 0.999;
+      float nz = (waving || recolor) ? vnoise(vUv * 1.7) : 0.5;
+      float gW = waving ? smoothstep(0.0, 0.25, uWave - nd - nz * 0.08) : 1.0;
+
+      float press = 0.0; vec2 lean = vec2(0.0);
+      if (uTrailOn > 0.5) {
+        for (int i = 0; i < ${TRAIL_N}; i++) {
+          vec4 T = uTrail[i];
+          if (T.z < 0.01) continue;
+          vec2 dv = vUv - T.xy;
+          float w = T.z * exp(-dot(dv, dv) * 12.0);
+          press = max(press, w);
+          lean += dv * w * 3.0;
+        }
+      }
+      float G = gW * (1.0 - 0.5 * press);
+
+      vec2 p = vUv * uDensity + lean * vH * 1.2;
+      float fp = length(fwidth(p));             // все производные до первого discard
+      float far = smoothstep(0.35, 1.0, fp);
+      bool base = vH < 0.001;
+      vec2 cell = floor(p);
+      float top = mix(0.6, 1.0, hash12(cell)) * G;
+      float hn = vH / max(top, 0.001);
+      if (!base && far < 0.001 && hn > 1.0) discard;          // ворсинка кончилась ниже этого слоя
+      vec2 o = fract(p) - 0.5 - (vec2(hash12(cell + 3.7), hash12(cell + 8.1)) - 0.5) * 0.3;
+      float hc = clamp(hn, 0.0, 1.0);
+      float rad = 0.52 * (1.0 - 0.72 * hc * sqrt(hc));
+      float d = length(o);
+      if (!base && far < 0.001 && d > rad + fp) discard;       // между ворсинками
+
+      float aa = max(fp, 0.0005) * 0.9;
+      float cov = hn > 1.0 ? 0.0 : 1.0 - smoothstep(rad - aa, rad + aa, d);
+      if (far > 0.0) {
+        float g0 = clamp(vH / max(G, 0.001), 0.0, 1.0);
+        float r0 = 0.52 * (1.0 - 0.72 * g0 * sqrt(g0));
+        float expCov = clamp((G - vH) / (0.4 * max(G, 0.001)), 0.0, 1.0) * clamp(3.1416 * r0 * r0 * 1.15, 0.0, 1.0);
+        cov = mix(cov, expCov, far);
+      }
+      if (base) cov = 1.0;
+      if (cov < uCut) discard;
+
+      vec3 col0 = uColA;
+      if (recolor) {
+        float front = uColT * 1.3 - 0.15;
+        col0 = mix(uColB, uColA, smoothstep(front - 0.06, front + 0.02, nd + (nz - 0.5) * 0.12));
+      } else if (uColT >= 0.999) col0 = uColB;
+
+      float r2 = hash12(cell + 19.19);
+      vec2 so = o / max(rad, 0.08);
+      vec3 n = normalize(vec3(so.x * 0.9 + lean.x * 0.6, 0.6 + 0.4 * hn, -(so.y * 0.9 + lean.y * 0.6)));
+      n = normalize(mix(n, vec3(0.0, 1.0, 0.0), far));
+      float nl = dot(n, uLightL);
+      float wrap = max((nl + 0.35) / 1.35, 0.0);
+      float ao = mix(0.18, 1.0, vH);
+      vec3 col = col0 * ao * (0.84 + 0.3 * r2) * (1.0 + 0.6 * press);
+      vec3 lit = col * (0.22 + 1.1 * wrap);
+      lit += col0 * 0.35 * smoothstep(0.7, 1.0, hn) * max(nl, 0.0);
+      float rl = max(dot(n, uRimL), 0.0);
+      lit += uRimC * rl * rl * 0.18 * vH;
+      gl_FragColor = vec4(lit, cov);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+pileMat.alphaToCoverage = true;
+// нижний сплошной слой пишет непрозрачность, верхние только цвет, иначе коврик просвечивает на прозрачном холсте
+const pile = new THREE.Mesh(layered(pileFlat, LAYERS, 0, 1), pileMat);
+pile.position.y = BASE_TOP;
+pivot.add(pile);
+const pileTop = new THREE.Mesh(layered(pileFlat, LAYERS, 1, LAYERS), pileMat);
+pileTop.onBeforeRender = r => r.getContext().colorMask(true, true, true, false);
+pileTop.onAfterRender = r => r.getContext().colorMask(true, true, true, true);
+pile.add(pileTop);
+
+// окантовка: плоская трубка по контуру
+const ribTex = canvasTex(64, 16, (g, w, h) => {
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h);
+  for (let x = 0; x < w; x += 8) { g.fillStyle = '#cfcfcf'; g.fillRect(x, 0, 3, h); g.fillStyle = '#e6e6e6'; g.fillRect(x + 3, 0, 1, h); }
+});
+ribTex.wrapS = ribTex.wrapT = THREE.RepeatWrapping;
+ribTex.repeat.set(280, 1);
+const edgeMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(EDGE[3][1]), map: ribTex, roughness: 0.72, metalness: 0 });
+const edgeCurve = new THREE.CatmullRomCurve3(inset(outerPts, 0.09).map(p => new THREE.Vector3(p.x, 0, -p.y)), true, 'catmullrom', 0.2);
+const edgeGeo = new THREE.TubeGeometry(edgeCurve, 480, 0.1, 12, true);
+edgeGeo.scale(1, 0.55, 1);
+const edging = new THREE.Mesh(edgeGeo, edgeMat);
+pivot.add(edging);
+
+// подпятник
+const heelTex = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#c3c6cb'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 16) { g.fillStyle = '#6f7278'; g.fillRect(0, y, w, 6); g.fillStyle = '#eceef0'; g.fillRect(0, y + 6, w, 2); }
+});
+heelTex.wrapS = heelTex.wrapT = THREE.RepeatWrapping;
+heelTex.repeat.set(1.2, 1.2);
+const heelGeo = new THREE.ExtrudeGeometry(rrect(HEEL.w, HEEL.h, 0.12), { depth: 0.022, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 2, curveSegments: 8 });
+heelGeo.rotateX(-Math.PI / 2);
+const heel = new THREE.Mesh(heelGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, map: heelTex, metalness: 0.75, roughness: 0.38 }));
+heel.position.set(HEEL.x, BASE_TOP, -HEEL.y);
+heel.rotation.y = HEEL.a;
+pivot.add(heel);
+
+// шильдик
+const BW = 0.8, BH = 0.24;
+const badgeTex = canvasTex(256, 80, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, w, h);
+  gr.addColorStop(0, '#e9eaec'); gr.addColorStop(0.45, '#9da1a7'); gr.addColorStop(1, '#e2e4e7');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#2a2c30'; g.font = '600 34px "Arial Narrow", Arial, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('ЛОГОТИП', w / 2, h / 2 + 2);
+});
+badgeTex.repeat.set(1 / BW, 1 / BH);
+badgeTex.offset.set(0.5, 0.5);
+const badgeGeo = new THREE.ExtrudeGeometry(rrect(BW, BH, 0.05), { depth: 0.01, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 6 });
+badgeGeo.rotateX(-Math.PI / 2);
+const badge = new THREE.Mesh(badgeGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, map: badgeTex, metalness: 0.8, roughness: 0.28 }));
+badge.position.set(-1.25, BASE_TOP, 2.58);
+pivot.add(badge);
+
+// мягкая тень
+const shadowTex = canvasTex(256, 256, (g, w, h) => {
+  const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+  gr.addColorStop(0, 'rgba(0,0,0,0.6)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+});
+const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, color: 0x000000 });
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(8.5, 10), shadowMat);
+shadow.rotation.x = -Math.PI / 2;
+shadow.position.y = -1.35;
+scene.add(shadow);
+
+// пылинки в свете
+const DUST = coarse ? 150 : 300;
+const dPos = new Float32Array(DUST * 3), dSeed = new Float32Array(DUST);
+for (let i = 0; i < DUST; i++) {
+  dPos[i * 3] = (Math.random() - 0.5) * 11;
+  dPos[i * 3 + 1] = 0.3 + Math.random() * 4;
+  dPos[i * 3 + 2] = -4.5 + Math.random() * 8;
+  dSeed[i] = Math.random();
+}
+const dGeo = new THREE.BufferGeometry();
+dGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3));
+const dustMat = new THREE.PointsMaterial({
+  size: 0.03, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  color: 0xffe3b3, opacity: 0.5,
+  map: canvasTex(64, 64, (g, w, h) => {
+    const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  }),
+});
+const dust = new THREE.Points(dGeo, dustMat);
+dust.visible = !reduce;
+scene.add(dust);
+
+// ---------- подписи слоёв ----------
+const tagsEl = document.getElementById('tags');
+const TAGS = [
+  [baseG, new THREE.Vector3(2.3, -0.02, 1.9), 'Основа с шипами'],
+  [pile, new THREE.Vector3(-1.5, 0.15, 0.4), 'Ворс'],
+  [edging, new THREE.Vector3(2.42, 0, -0.6), 'Окантовка'],
+  [heel, new THREE.Vector3(0.5, 0.03, -0.3), 'Подпятник'],
+  [badge, new THREE.Vector3(-0.3, 0.02, 0), 'Шильдик'],
+].map(([obj, at, text]) => {
+  const el = document.createElement('div');
+  el.className = 'tag';
+  el.innerHTML = '<span class="ln"></span>';
+  el.appendChild(document.createTextNode(text));
+  tagsEl.appendChild(el);
+  return { obj, at, el };
+});
+
+// ---------- линейка ----------
+const rulerEl = document.getElementById('ruler'), rulerFill = document.getElementById('rulerFill'), rulerVal = document.getElementById('rulerVal');
+{
+  const sc = document.getElementById('rulerScale');
+  for (let mm = 0; mm <= 20; mm++) {
+    const t = document.createElement('div');
+    t.className = 'tk' + (mm % 5 === 0 ? ' major' : '');
+    t.style.bottom = (mm / 20) * 100 + '%';
+    if (mm % 5 === 0) t.innerHTML = `<span>${mm}</span>`;
+    sc.appendChild(t);
+  }
+}
+
+// ---------- сценарий: камера по плавной кривой, без остановок ----------
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const CAM = [
+  [0,    V(0, 8.0, 8.6),     V(0, -0.25, 0.3),  -0.45],
+  [0.5,  V(2.6, 4.0, 7.3),   V(0.1, 0, 2.1),    -0.2],
+  [1.0,  V(1.3, 0.98, 4.55), V(0.1, 0.1, 2.65),  0],
+  [1.7,  V(0.85, 0.92, 4.5), V(0.0, 0.1, 2.62),  0],
+  [2.4,  V(0.4, 0.95, 4.45), V(-0.1, 0.1, 2.58), 0],
+  [2.95, V(-1.6, 3.6, 7.0),  V(0, 0, 1.2),       0.2],
+  [3.45, V(0, 7.4, 7.8),     V(0, -0.25, 0.25),  0.45],
+  [4.2,  V(-0.7, 7.6, 7.6),  V(0, -0.25, 0.25),  0],
+  [5.0,  V(0.5, 7.3, 7.9),   V(0, -0.25, 0.25), -0.4],
+  [5.5,  V(5.0, 5.9, 8.6),   V(0, 0.05, 0),     -0.3],
+  [6.0,  V(7.6, 5.2, 8.4),   V(0, 0.1, 0),      -0.25],
+  [6.55, V(7.2, 5.9, 8.8),   V(0, 0.1, 0),      -0.55],
+  [7.1,  V(2.6, 6.4, 9.2),   V(0, 0.2, 0.2),     0.3],
+  [7.5,  V(1.2, 6.8, 9.0),   V(0, 0.2, 0.2),     0.1],
+  [8.2,  V(0, 7.8, 8.4),     V(0, -0.25, 0.3),  -0.35],
+];
+const PAR = [
+  { s: 0,    mm: 10, ex: 0, flip: 0, lift: 0, heel: 1 },
+  { s: 1.0,  mm: 6 },
+  { s: 1.7,  mm: 10 },
+  { s: 2.4,  mm: 15 },
+  { s: 2.95, mm: 15 },
+  { s: 3.45, mm: 10 },
+  { s: 5.5,  ex: 0 },
+  { s: 6.0,  ex: 1 },
+  { s: 6.55, ex: 1 },
+  { s: 7.1,  ex: 0, flip: Math.PI, lift: 0.6 },
+  { s: 7.5,  flip: Math.PI },
+  { s: 8.2,  flip: Math.PI * 2, lift: 0, mm: () => cfg.mm, heel: () => (cfg.heel ? 1 : 0) },
+];
+for (let i = 1; i < PAR.length; i++) for (const k of Object.keys(PAR[i - 1])) if (!(k in PAR[i])) PAR[i][k] = PAR[i - 1][k];
+const val = (k, key) => (typeof k[key] === 'function' ? k[key]() : k[key]);
+
+// настроение шага: фон, текст, свет, контровой свет
+const MOOD = [
+  { s: 0,    ground: '#0f1012', glow: '#2c2b2a', ink: '#efeee9', muted: '#a4a6ab', line: '#2e3035', panel: '#111214', pa: .78, sh: .55, giant: '#ffffff', grid: 0, dust: 1,   light: [0.35, 1, 0.55], rim: '#d9b56c', rimI: 1.1 },
+  { s: 0.9,  ground: '#08080a', glow: '#221d15', light: [0.85, 0.6, 0.3], rimI: 1.3, dust: .45 },
+  { s: 2.7 },
+  { s: 3.4,  dyn: true, light: [0.3, 1, 0.6], rimI: 0.9, dust: .7 },
+  { s: 5.1,  dyn: true },
+  { s: 5.75, ground: '#09111d', glow: '#16273f', grid: 1, light: [-0.3, 1, 0.6], rim: '#7fb2ff', rimI: 1.3, dust: .25 },
+  { s: 6.55 },
+  { s: 7.1,  ground: '#130909', glow: '#3e1318', grid: 0, light: [1, 0.55, 0.15], rim: '#ff4b3e', rimI: 1.9, dust: .9 },
+  { s: 7.5 },
+  { s: 8.05, ground: '#d7d5d0', glow: '#f5f4f0', ink: '#141416', muted: '#55575c', line: '#bdbbb5', panel: '#f7f6f2', pa: .86, sh: 0, giant: '#000000', light: [0.35, 1, 0.55], rim: '#ffffff', rimI: 0.5, dust: 0 },
+];
+for (let i = 1; i < MOOD.length; i++) for (const k of Object.keys(MOOD[i - 1])) if (k !== 'dyn' && !(k in MOOD[i])) MOOD[i][k] = MOOD[i - 1][k];
+for (const m of MOOD) for (const k of ['ground', 'glow', 'ink', 'muted', 'line', 'panel', 'giant', 'rim']) m[k] = hexRgb(m[k]);
+
+const pileLin = PILE.map(p => new THREE.Color(p[1]));
+const edgeLin = EDGE.map(p => new THREE.Color(p[1]));
+
+// цвет ворса: на шаге «цвет» волна идёт по всей палитре и возвращается к выбранному
+const SWEEP_A = 3.4, SWEEP_B = 5.25;
+const colAnim = { from: 0, to: 0, t: 1 };
+function colorState(s) {
+  if (s > SWEEP_A && s < SWEEP_B) {
+    const seq = []; for (let i = 0; i <= PILE.length; i++) seq.push((cfg.col + i) % PILE.length);
+    const idx = (s - SWEEP_A) / (SWEEP_B - SWEEP_A) * (seq.length - 1);
+    const i = Math.min(Math.floor(idx), seq.length - 2);
+    return { a: seq[i], b: seq[i + 1], t: smooth(0.15, 0.85, idx - i), name: seq[Math.round(idx)] };
+  }
+  const t = smooth(0, 1, colAnim.t);
+  return { a: colAnim.from, b: colAnim.to, t, name: colAnim.to };
+}
+
+function scrollS() {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  return max > 0 ? (scrollY / max) * S_MAX : 0;
+}
+
+// ---------- подписи: слова выезжают по прокрутке ----------
+const CAPR = [[-9, 0.45], [0.8, 2.85], [3.25, 5.2], [5.6, 6.65], [6.9, 7.6], [7.85, 99]];
+const caps = [...document.querySelectorAll('.cap')].map((el, i) => {
+  el.querySelectorAll('[data-hint]').forEach(h => { const [a, b] = h.dataset.hint.split('|'); h.textContent = coarse ? b : a; });
+  const words = [];
+  el.querySelectorAll('[data-split]').forEach(node => {
+    if (node.children.length) {                // большая цифра: целиком в маску
+      const inner = document.createElement('span'); inner.className = 'wi';
+      while (node.firstChild) inner.appendChild(node.firstChild);
+      const m = document.createElement('span'); m.className = 'wm'; m.appendChild(inner);
+      node.appendChild(m); words.push(inner);
+    } else {
+      const parts = node.textContent.trim().split(/\s+/);
+      node.textContent = '';
+      parts.forEach((w, k) => {
+        const m = document.createElement('span'); m.className = 'wm';
+        const inner = document.createElement('span'); inner.className = 'wi'; inner.textContent = w;
+        m.appendChild(inner); node.appendChild(m);
+        if (k < parts.length - 1) node.appendChild(document.createTextNode(' '));
+        words.push(inner);
+      });
+    }
+  });
+  return { el, words, fades: [...el.querySelectorAll('.fd')], a: CAPR[i][0], b: CAPR[i][1], last: '' };
+});
+function resplit(cap, node, text) {           // для названия цвета
+  node.textContent = '';
+  const m = document.createElement('span'); m.className = 'wm';
+  const inner = document.createElement('span'); inner.className = 'wi'; inner.textContent = text;
+  m.appendChild(inner); node.appendChild(m);
+  cap.words = [inner]; cap.last = '';
+}
+function drawCap(cap, e, x) {
+  const vis = e * (1 - x);
+  const key = e.toFixed(3) + '|' + x.toFixed(3);
+  if (key === cap.last) return vis;
+  cap.last = key;
+  cap.el.classList.toggle('live', vis > 0.002);
+  cap.el.style.opacity = smooth(0, 0.35, vis).toFixed(3);
+  cap.el.classList.toggle('touch', vis > 0.6);
+  cap.words.forEach((w, i) => {
+    const ei = smooth(0, 1, e * 1.5 - i * 0.09), xi = smooth(0, 1, x * 1.5 - i * 0.05);
+    w.style.transform = `translate3d(0, ${((1 - ei) * 108 - xi * 108).toFixed(2)}%, 0)`;
+  });
+  cap.fades.forEach((f, i) => {
+    const ef = smooth(0, 1, e * 1.4 - 0.25 - i * 0.06), xf = smooth(0, 1, x * 1.5);
+    f.style.opacity = (ef * (1 - xf)).toFixed(3);
+    f.style.transform = `translate3d(0, ${((1 - ef) * 18 - xf * 18).toFixed(1)}px, 0)`;
+  });
+  return vis;
+}
+
+// ---------- гигантские слова на фоне ----------
+const giantsEl = document.getElementById('giants');
+const GIANTS = ['Коврики', 'Ворс', PILE[0][0], 'Слои', 'Шипы'].map((t, i) => {
+  const el = document.createElement('div'); el.className = 'giant'; el.textContent = t; giantsEl.appendChild(el);
+  return { el, i, text: t };
+});
+
+// ---------- навигация ----------
+const railBtns = [...document.querySelectorAll('#rail button')];
+function goTo(s) {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  scrollTo({ top: (s / S_MAX) * max, behavior: reduce ? 'auto' : 'smooth' });
+}
+railBtns.forEach(b => b.addEventListener('click', () => goTo(parseFloat(b.dataset.s))));
+document.getElementById('track').style.height = (S_MAX + 1) * 100 + 'vh';
+const prog = document.getElementById('prog');
+const mmv = document.getElementById('mmv');
+const colNameEl = document.getElementById('colName');
+
+// ---------- конструктор ----------
+const mmIn = document.getElementById('mm'), mmOut = document.getElementById('mmOut');
+const presetBtns = [...document.querySelectorAll('#presets button')];
+const pileOut = document.getElementById('pileOut'), edgeOut = document.getElementById('edgeOut');
+const summary = document.getElementById('summary'), note = document.getElementById('note');
+function swatches(host, list, key, out) {
+  list.forEach(([name, hex], i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.style.background = hex; b.title = name;
+    b.setAttribute('aria-label', name);
+    b.setAttribute('aria-pressed', String(cfg[key] === i));
+    b.addEventListener('click', () => {
+      if (key === 'col' && cfg.col !== i) { colAnim.from = colorState(99).b; colAnim.to = i; colAnim.t = 0; }
+      cfg[key] = i;
+      [...host.children].forEach((c, k) => c.setAttribute('aria-pressed', String(k === i)));
+      out.textContent = name;
+      refresh();
+    });
+    host.appendChild(b);
+  });
+}
+swatches(document.getElementById('pileSw'), PILE, 'col', pileOut);
+swatches(document.getElementById('edgeSw'), EDGE, 'edge', edgeOut);
+function refresh() {
+  const mm = Number.isInteger(cfg.mm) ? cfg.mm : cfg.mm.toFixed(1).replace('.', ',');
+  mmOut.textContent = mm + ' мм';
+  presetBtns.forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.mm === cfg.mm)));
+  summary.textContent = `Ворс ${mm} мм, ${PILE[cfg.col][0].toLowerCase()}, кант ${EDGE[cfg.edge][0].toLowerCase()}${cfg.heel ? ', подпятник' : ''}`;
+  note.hidden = true;
+}
+mmIn.addEventListener('input', () => { cfg.mm = parseFloat(mmIn.value); refresh(); });
+presetBtns.forEach(b => b.addEventListener('click', () => { cfg.mm = +b.dataset.mm; mmIn.value = cfg.mm; refresh(); }));
+document.getElementById('heel').addEventListener('change', e => { cfg.heel = e.target.checked; refresh(); });
+document.getElementById('order').addEventListener('click', () => { note.hidden = false; });
+refresh();
+
+// ---------- палец / мышь: крутить и гладить ворс ----------
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), inv = new THREE.Matrix4();
+const rO = new THREE.Vector3(), rD = new THREE.Vector3(), lastHit = new THREE.Vector2(1e9, 1e9);
+let trailI = 0, W = 1, H = 1, portrait = false, capIdx = 0;
+function pileHit(cx, cy) {
+  if (Math.cos(pivot.rotation.z) < 0.3) return null;           // коврик перевёрнут
+  ndc.set((cx / W) * 2 - 1, -(cy / H) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  inv.copy(pile.matrixWorld).invert();
+  rO.copy(ray.ray.origin).applyMatrix4(inv);
+  rD.copy(ray.ray.direction).transformDirection(inv);
+  if (Math.abs(rD.y) < 1e-4) return null;
+  const t = (pileMat.uniforms.uHeight.value * 0.8 - rO.y) / rD.y;
+  if (t < 0) return null;
+  const hit = new THREE.Vector2(rO.x + rD.x * t, -(rO.z + rD.z * t));
+  return inside(hit, innerPts) ? hit : null;
+}
+function brush(cx, cy) {
+  const hit = pileHit(cx, cy);
+  if (!hit) return;
+  if (hit.distanceTo(lastHit) < 0.1) { trail[(trailI + TRAIL_N - 1) % TRAIL_N].z = 1; return; }
+  lastHit.copy(hit);
+  trail[trailI].set(hit.x, hit.y, 1, 0);
+  trailI = (trailI + 1) % TRAIL_N;
+}
+let down = false, lastX = 0, lastT = 0, yawUser = 0, yawVel = 0;
+canvas.addEventListener('pointerdown', e => {
+  down = true; lastX = e.clientX; lastT = performance.now(); yawVel = 0;
+  canvas.classList.add('dragging');
+  canvas.setPointerCapture(e.pointerId);
+  if (e.pointerType !== 'mouse') brush(e.clientX, e.clientY);
+});
+canvas.addEventListener('pointermove', e => {
+  const mouse = e.pointerType === 'mouse';
+  if ((mouse && !down) || (!mouse && down) || capIdx === 1) brush(e.clientX, e.clientY);
+  if (!down || capIdx === 1) return;
+  const now = performance.now(), dx = e.clientX - lastX;
+  yawUser += dx * 0.009;
+  yawVel = (dx * 0.009) / Math.max((now - lastT) / 1000, 0.008);
+  lastX = e.clientX; lastT = now;
+});
+const endDrag = () => { down = false; canvas.classList.remove('dragging'); };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+// ---------- размер и кадр ----------
+function resize() {
+  W = innerWidth; H = innerHeight; portrait = W / H < 0.9;
+  renderer.setSize(W, H, false);
+  camera.aspect = W / H;
+  const a = Math.min(W / H, 1);
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(16)) / Math.pow(a, 0.9)));
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+const root = document.documentElement.style;
+const cssCache = {};
+const setVar = (k, v) => { if (cssCache[k] !== v) { root.setProperty(k, v); cssCache[k] = v; } };
+const gridEl = document.getElementById('grid');
+const tmpV = new THREE.Vector3(), camOff = new THREE.Vector3(), lightW = new THREE.Vector3(), qInv = new THREE.Quaternion();
+const shown = new THREE.Color(), rimC = new THREE.Color();
+const cur = { mm: 10, heel: 1, edge: new THREE.Color(EDGE[3][1]) };
+let sS = scrollS(), lastMm = -1, lastName = -1, perfT = 0, perfN = 0, perfSkip = 90;
+const clock = new THREE.Clock();
+
+function camAt(s) {
+  s = clamp(s, 0, S_MAX);
+  let i = 0;
+  while (i < CAM.length - 2 && s >= CAM[i + 1][0]) i++;
+  const t = clamp((s - CAM[i][0]) / (CAM[i + 1][0] - CAM[i][0]), 0, 1);
+  const k0 = CAM[Math.max(i - 1, 0)], k1 = CAM[i], k2 = CAM[i + 1], k3 = CAM[Math.min(i + 2, CAM.length - 1)];
+  const out = { cam: new THREE.Vector3(), tgt: new THREE.Vector3(), yaw: cr(k0[3], k1[3], k2[3], k3[3], t) };
+  for (const ax of ['x', 'y', 'z']) {
+    out.cam[ax] = cr(k0[1][ax], k1[1][ax], k2[1][ax], k3[1][ax], t);
+    out.tgt[ax] = cr(k0[2][ax], k1[2][ax], k2[2][ax], k3[2][ax], t);
+  }
+  return out;
+}
+function parAt(s) {
+  s = clamp(s, 0, S_MAX);
+  let i = 0;
+  while (i < PAR.length - 2 && s >= PAR[i + 1].s) i++;
+  const a = PAR[i], b = PAR[i + 1], e = smooth(a.s, b.s, s), o = {};
+  for (const k of ['mm', 'ex', 'flip', 'lift', 'heel']) o[k] = lerp(val(a, k), val(b, k), e);
+  return o;
+}
+function moodAt(s, pileRgb) {
+  let i = 0;
+  while (i < MOOD.length - 2 && s >= MOOD[i + 1].s) i++;
+  const a = MOOD[i], b = MOOD[i + 1], e = smooth(a.s, b.s, s), o = {};
+  const res = (m, k) => {
+    if (m.dyn && k === 'ground') return mixRgb([10, 10, 11], pileRgb, 0.42);
+    if (m.dyn && k === 'glow') return mixRgb(pileRgb, [255, 255, 255], 0.1).map(v => Math.min(255, v * 1.25));
+    return m[k];
+  };
+  for (const k of ['ground', 'glow', 'ink', 'muted', 'line', 'panel', 'giant', 'rim']) o[k] = mixRgb(res(a, k), res(b, k), e);
+  for (const k of ['pa', 'sh', 'grid', 'dust', 'rimI']) o[k] = lerp(a[k], b[k], e);
+  o.light = a.light.map((v, j) => lerp(v, b.light[j], e));
+  return o;
+}
+
+function tick(dt, t, sRaw, snap) {
+  sS = snap ? sRaw : sS + (sRaw - sS) * (1 - Math.exp(-dt * 8));
+  const s = sS;
+  const intro = reduce || snap ? 1 : smooth(0.1, 1.5, t);
+  const drop = 1 - Math.pow(1 - intro, 3);
+  const k = snap ? 1 : 1 - Math.exp(-dt * 9);
+
+  const C = camAt(s), P = parAt(s);
+  cur.mm += (P.mm - cur.mm) * k;
+  cur.heel += (P.heel - cur.heel) * k;
+  cur.edge.lerp(edgeLin[cfg.edge], k);
+  if (colAnim.t < 1) colAnim.t = snap ? 1 : Math.min(1, colAnim.t + dt / 1.1);
+  const CS = colorState(s);
+  shown.copy(pileLin[CS.a]).lerp(pileLin[CS.b], CS.t);
+
+  capIdx = 0;
+  const inCfg = s >= CAPR[5][0] - 0.1;
+  if (!down) {
+    yawUser += yawVel * dt; yawVel *= Math.exp(-dt * 4);
+    if (!inCfg) yawUser *= Math.exp(-dt * 1.6);
+  }
+  const hero = reduce ? 0 : 1 - smooth(0, 0.5, s);
+  pivot.rotation.set(0, C.yaw + yawUser + hero * Math.sin(t * 0.35) * 0.45, P.flip);
+  pivot.position.y = P.lift + hero * Math.sin(t * 1.1) * 0.06 + (1 - drop) * 1.6;
+
+  const ex = P.ex, pileH = cur.mm * MM;
+  baseG.position.y = -0.95 * ex;
+  edging.position.y = BASE_TOP + 0.015 + 0.8 * ex;
+  heel.position.y = BASE_TOP + 0.004 + 1.45 * ex;
+  badge.position.y = BASE_TOP + pileH * 0.9 + 1.95 * ex;
+  const hs = Math.max(cur.heel, 0.001);
+  heel.scale.setScalar(hs); heel.visible = cur.heel > 0.02;
+
+  const U = pileMat.uniforms;
+  U.uHeight.value = pileH;
+  U.uColA.value.copy(pileLin[CS.a]);
+  U.uColB.value.copy(pileLin[CS.b]);
+  U.uColT.value = CS.t;
+  U.uHole.value.z = (HEEL.w / 2) * hs;
+  U.uHole.value.w = (HEEL.h / 2) * hs;
+  U.uWave.value = reduce || snap ? 2 : lerp(-0.3, 1.5, smooth(0.35, 2.4, t));
+  edgeMat.color.copy(cur.edge);
+  shadowMat.opacity = 0.85 - 0.35 * ex - 0.25 * smooth(0, 0.9, P.lift);
+  let trailOn = 0;
+  for (const T of trail) { T.z *= snap ? 1 : Math.exp(-dt * 0.7); if (T.z > 0.01) trailOn = 1; }
+  U.uTrailOn.value = trailOn;
+
+  // настроение
+  const M = moodAt(s, hexRgb('#' + shown.getHexString()));
+  setVar('--ground', css(M.ground));
+  setVar('--glow', css(M.glow));
+  setVar('--ink', css(M.ink));
+  setVar('--muted', css(M.muted));
+  setVar('--line', css(M.line));
+  setVar('--panel', `rgba(${M.panel.map(Math.round).join(',')},${M.pa.toFixed(2)})`);
+  setVar('--shadow', `rgba(0,0,0,${M.sh.toFixed(2)})`);
+  setVar('--giant', M.giant.map(Math.round).join(','));
+  const go = M.grid.toFixed(3);
+  if (cssCache.grid !== go) { gridEl.style.opacity = go; cssCache.grid = go; }
+  lightW.set(...M.light).normalize();
+  key.position.copy(lightW).multiplyScalar(10);
+  rimC.setRGB(M.rim[0] / 255, M.rim[1] / 255, M.rim[2] / 255, THREE.SRGBColorSpace);
+  rim.color.copy(rimC); rim.intensity = M.rimI;
+  qInv.copy(pivot.quaternion).invert();
+  U.uLightL.value.copy(lightW).applyQuaternion(qInv);
+  U.uRimL.value.copy(RIM_DIR).applyQuaternion(qInv);
+  U.uRimC.value.copy(rimC).multiplyScalar(M.rimI);
+  dustMat.opacity = 0.55 * M.dust;
+  dustMat.color.copy(rimC).lerp(new THREE.Color(0xffffff), 0.5);
+
+  if (!snap && !reduce) {
+    const a = dGeo.attributes.position.array;
+    for (let i = 0; i < DUST; i++) {
+      a[i * 3 + 1] += dt * (0.04 + dSeed[i] * 0.08);
+      a[i * 3] += Math.sin(t * 0.4 + dSeed[i] * 40) * dt * 0.05;
+      if (a[i * 3 + 1] > 4.3) a[i * 3 + 1] = 0.3;
+    }
+    dGeo.attributes.position.needsUpdate = true;
+  }
+
+  // камера
+  const dist = (portrait ? 1.3 : 1) * (1 + (1 - drop) * 0.6);
+  camOff.copy(C.cam).sub(C.tgt).multiplyScalar(dist);
+  camera.position.copy(C.tgt).add(camOff);
+  camera.lookAt(C.tgt);
+  if (portrait) camera.setViewOffset(W, H, 0, H * (0.15 + 0.1 * smooth(7.5, 8.2, s)), W, H);
+  else camera.setViewOffset(W, H, -W * 0.13, 0, W, H);
+  camera.updateProjectionMatrix();
+
+  // подписи
+  let best = 0, bestI = 0;
+  caps.forEach((cap, i) => {
+    const e = i === 0 ? smooth(0.2, 1.3, snap ? 9 : t) : smooth(cap.a - 0.35, cap.a, s);
+    const x = smooth(cap.b, cap.b + 0.35, s);
+    const v = drawCap(cap, e, x);
+    if (v > best) { best = v; bestI = i; }
+    if (i < GIANTS.length) {
+      const g = GIANTS[i];
+      const lo = i === 0 ? -0.6 : cap.a - 0.35, hi = cap.b + 0.35;
+      const pr = clamp((s - lo) / (hi - lo), 0, 1);
+      g.el.style.opacity = v.toFixed(3);
+      g.el.style.transform = `translate(-50%, -50%) translate3d(${((0.5 - pr) * 36).toFixed(2)}vw, 0, 0)`;
+    }
+  });
+  capIdx = bestI;
+  railBtns.forEach((b, i) => b.classList.toggle('on', i === capIdx));
+
+  const mmR = Math.round(cur.mm);
+  if (mmR !== lastMm) { mmv.textContent = mmR; lastMm = mmR; }
+  if (CS.name !== lastName) {
+    lastName = CS.name;
+    resplit(caps[2], colNameEl, PILE[CS.name][0]);
+    GIANTS[2].el.textContent = PILE[CS.name][0];
+  }
+  const rv = caps[1].el.classList.contains('live') ? smooth(0.4, 0.9, best * (capIdx === 1 ? 1 : 0)) : 0;
+  rulerEl.style.opacity = rv.toFixed(3);
+  if (rv > 0) {
+    const pct = (cur.mm / 20) * 100;
+    rulerFill.style.height = pct + '%';
+    rulerVal.style.bottom = pct + '%';
+    rulerVal.textContent = cur.mm.toFixed(1).replace('.', ',') + ' мм';
+  }
+  prog.style.width = (s / S_MAX) * 100 + '%';
+
+  const tagOp = smooth(0.35, 0.9, ex);
+  scene.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  for (const tag of TAGS) {
+    if (tagOp < 0.01) { tag.el.style.opacity = 0; continue; }
+    tmpV.copy(tag.at);
+    tag.obj.localToWorld(tmpV);
+    tmpV.project(camera);
+    const x = (tmpV.x * 0.5 + 0.5) * W, y = (-tmpV.y * 0.5 + 0.5) * H;
+    tag.el.style.transform = `translate(${(x - 3.5).toFixed(1)}px, ${(y - 8).toFixed(1)}px)`;
+    tag.el.style.opacity = tmpV.z < 1 ? tagOp : 0;
+  }
+
+  renderer.render(scene, camera);
+
+  // если устройство не тянет, снижаем чёткость
+  if (perfSkip > 0) perfSkip--;
+  else {
+    perfT += dt; perfN++;
+    if (perfN >= 90) {
+      if (perfN / perfT < 40 && dpr > 0.6) { dpr = Math.max(0.6, dpr - 0.2); renderer.setPixelRatio(dpr); resize(); }
+      perfT = 0; perfN = 0;
+    }
+  }
+}
+function frame() {
+  tick(Math.min(clock.getDelta(), 0.05), clock.elapsedTime, scrollS(), false);
+  requestAnimationFrame(frame);
+}
+renderer.compile(scene, camera);
+// для проверки без живой отрисовки: localhost/?dev, затем __snap(шаг)
+if (DEV) {
+  let devS = parseFloat(new URLSearchParams(location.search).get('s') || '0');
+  window.__snap = s => { devS = s; tick(0.016, 9, s, true); return s; };
+  if (location.search.includes('bench')) {
+    const gl = renderer.getContext(), px = new Uint8Array(4), res = {};
+    res.gpu = gpuName; res.aa = useAA; res.dpr = dpr;
+    res.size = canvas.width + 'x' + canvas.height;
+    for (const [n, st] of [['hero', 0], ['macro10', 1.7], ['macro15', 2.4], ['colors', 4.2], ['layers', 6.1], ['under', 7.3], ['cfg', 8.2]]) {
+      for (let i = 0; i < 3; i++) __snap(st);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const t0 = performance.now();
+      for (let i = 0; i < 8; i++) { __snap(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+      res[n] = +((performance.now() - t0) / 8).toFixed(1);
+    }
+    document.body.dataset.bench = JSON.stringify(res);
+  }
+  let devN = 0;
+  const loop = () => {
+    tick(0.016, 9, devS, true);
+    if (++devN === 3 && QS.has('brush')) for (let i = 0; i < 40; i++) brush(W * 0.5 + i * 7, H * 0.42 + Math.sin(i / 5) * 40);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+else requestAnimationFrame(frame);
+</script>
+</body>
+</html>
