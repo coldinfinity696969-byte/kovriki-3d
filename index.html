@@ -180,6 +180,11 @@
     display: grid; gap: 16px;
   }
   .panel h2 { margin: 0; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .collapse {
+    display: none; font: 500 13px/1 var(--body); color: var(--ink); cursor: pointer;
+    background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px;
+  }
   .row { display: grid; gap: 8px; }
   .row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .row-head label, .row-head span.lbl { font-size: 13px; color: var(--muted); }
@@ -244,8 +249,15 @@
     .cap .big { font-size: 64px; margin-bottom: 10px; }
     .cap .big.word { font-size: 46px; }
     .hint { margin-top: 12px; }
-    .panel { padding: 14px; gap: 12px; }
+    .panel { padding: 12px 14px; gap: 10px; }
+    .panel h2 { font-size: 24px; }
     .cfg .eyebrow { display: none; }
+    .presets, .summary { display: none; }
+    .sw { gap: 7px; }
+    .sw button { width: 31px; height: 31px; }
+    .collapse { display: inline-flex; }
+    .panel.min .row, .panel.min .toggle, .panel.min .note { display: none; }
+    .panel.min .order { flex: 1; }
     .ruler { right: 16px; top: calc(62px + env(safe-area-inset-top, 0px)); transform: none; height: 30vh; width: 96px; }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -312,10 +324,13 @@
     <p class="fd">Резиновая основа с шипами цепляется за покрытие салона. Коврик не уезжает под педали.</p>
   </div>
   <div class="cap cfg">
-    <div class="panel fd">
-      <div>
-        <p class="eyebrow">Конструктор</p>
-        <h2>Соберите свой</h2>
+    <div class="panel fd" id="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Конструктор</p>
+          <h2>Соберите свой</h2>
+        </div>
+        <button type="button" class="collapse" id="collapse" aria-expanded="true" aria-controls="panel">Свернуть</button>
       </div>
       <div class="row">
         <div class="row-head"><label for="mm">Высота ворса</label><b id="mmOut">10 мм</b></div>
@@ -939,6 +954,12 @@ mmIn.addEventListener('input', () => { cfg.mm = parseFloat(mmIn.value); refresh(
 presetBtns.forEach(b => b.addEventListener('click', () => { cfg.mm = +b.dataset.mm; mmIn.value = cfg.mm; refresh(); }));
 document.getElementById('heel').addEventListener('change', e => { cfg.heel = e.target.checked; refresh(); });
 document.getElementById('order').addEventListener('click', () => { note.hidden = false; });
+const panelEl = document.getElementById('panel'), collapseBtn = document.getElementById('collapse');
+collapseBtn.addEventListener('click', () => {
+  const min = panelEl.classList.toggle('min');
+  collapseBtn.textContent = min ? 'Настроить' : 'Свернуть';
+  collapseBtn.setAttribute('aria-expanded', String(!min));
+});
 refresh();
 
 // ---------- палец / мышь: крутить и гладить ворс ----------
@@ -1002,6 +1023,38 @@ const root = document.documentElement.style;
 const cssCache = {};
 const setVar = (k, v) => { if (cssCache[k] !== v) { root.setProperty(k, v); cssCache[k] = v; } };
 const gridEl = document.getElementById('grid');
+const headerEl = document.querySelector('.top');
+// на телефоне в конструкторе коврик вписывается в место между шапкой и панелью;
+// кольцо радиусом с коврик не меняется при вращении, поэтому размер не «дышит», когда его крутят
+const FIT_C = new THREE.Vector3(0, 0.05, -0.05), FIT_R = 3.6;
+const fitRing = Array.from({ length: 24 }, (_, i) => {
+  const a = (i / 24) * Math.PI * 2;
+  return new THREE.Vector3(Math.cos(a) * FIT_R, 0.05, Math.sin(a) * FIT_R - 0.05);
+});
+const fitDir = new THREE.Vector3(), fitPos = new THREE.Vector3(), fitTgt = new THREE.Vector3(), fitP = new THREE.Vector3();
+function fitView(C) {
+  const top = headerEl.getBoundingClientRect().bottom + 6;
+  const pr = panelEl.getBoundingClientRect();
+  const bottom = (pr.height > 0 ? pr.top : H) - 10;
+  const availH = Math.max(bottom - top, 80), availW = W - 20;
+  fitDir.copy(C.cam).sub(C.tgt).normalize();
+  let d = C.cam.distanceTo(C.tgt) * 1.3, x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+  for (let it = 0; it < 3; it++) {
+    camera.position.copy(FIT_C).addScaledVector(fitDir, d);
+    camera.lookAt(FIT_C);
+    camera.clearViewOffset();
+    camera.updateMatrixWorld();
+    x0 = y0 = Infinity; x1 = y1 = -Infinity;
+    for (const r of fitRing) {
+      fitP.copy(r).project(camera);
+      const x = (fitP.x * 0.5 + 0.5) * W, y = (-fitP.y * 0.5 + 0.5) * H;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    if (it < 2) d *= Math.max((x1 - x0) / availW, (y1 - y0) / availH);
+  }
+  fitPos.copy(camera.position);
+  return { offX: (x0 + x1) / 2 - W / 2, offY: (y0 + y1) / 2 - (top + bottom) / 2 };
+}
 const tmpV = new THREE.Vector3(), camOff = new THREE.Vector3(), lightW = new THREE.Vector3(), qInv = new THREE.Quaternion();
 const shown = new THREE.Color(), rimC = new THREE.Color();
 const cur = { mm: 10, heel: 1, edge: new THREE.Color(EDGE[3][1]) };
@@ -1126,11 +1179,21 @@ function tick(dt, t, sRaw, snap) {
 
   // камера
   const dist = (portrait ? 1.3 : 1) * (1 + (1 - drop) * 0.6);
+  const fitW = portrait ? smooth(7.5, 8.15, s) : 0;
+  let offX = portrait ? 0 : -W * 0.13, offY = portrait ? H * 0.15 : 0;
   camOff.copy(C.cam).sub(C.tgt).multiplyScalar(dist);
+  fitTgt.copy(C.tgt);
   camera.position.copy(C.tgt).add(camOff);
-  camera.lookAt(C.tgt);
-  if (portrait) camera.setViewOffset(W, H, 0, H * (0.15 + 0.1 * smooth(7.5, 8.2, s)), W, H);
-  else camera.setViewOffset(W, H, -W * 0.13, 0, W, H);
+  if (fitW > 0.001) {
+    const base = camera.position.clone();
+    const F = fitView(C);
+    camera.position.lerpVectors(base, fitPos, fitW);
+    fitTgt.lerp(FIT_C, fitW);
+    offX = lerp(offX, F.offX, fitW);
+    offY = lerp(offY, F.offY, fitW);
+  }
+  camera.lookAt(fitTgt);
+  camera.setViewOffset(W, H, offX, offY, W, H);
   camera.updateProjectionMatrix();
 
   // подписи
@@ -1215,6 +1278,7 @@ if (DEV) {
     }
     document.body.dataset.bench = JSON.stringify(res);
   }
+  if (QS.has('min')) collapseBtn.click();
   let devN = 0;
   const loop = () => {
     tick(0.016, 9, devS, true);
